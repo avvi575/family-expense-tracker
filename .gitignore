@@ -42,6 +42,10 @@ app password.txt
 Public repo path.txt
 test_pdf_extract.js
 *.zip
+cc-parser-master/Sep cc bill.pdf
+cc-parser-master/sep_parsed.json
+cc-parser-master/sep_parsed_icici.json
+backend/temp-pdf-to-img.js
 Statement/
 
 # cc-parser
