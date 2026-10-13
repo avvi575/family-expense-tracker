@@ -1,0 +1,54 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.*.local
+*.env
+*.log
+android/.gradle/
+android/local.properties
+android/.idea/
+*.apk
+uploads/
+backend/.env
+backend/.env.*
+backend/outbox/
+backend/statement-inbox/
+backend/temp_out/
+backend/dev.db
+backend/dev.db.bak
+backend/*.db
+backend/*.db.bak
+backend/prisma/*.db
+backend/prisma/*.db.bak
+backend/*.sqlite
+backend/*.sqlite3
+backend/eng.traineddata
+backend/temp_*.ts
+backend/temp_*.js
+backend/test_*.ts
+backend/test_*.js
+backend/test-smtp.ts
+backend/test_extract.ts
+**/.env
+**/.env.*
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+Thumbs.db
+app password.txt
+Public repo path.txt
+test_pdf_extract.js
+*.zip
+Statement/
+
+# cc-parser
+cc-parser-master/**/.venv/
+cc-parser-master/**/.pytest_cache/
+cc-parser-master/cc-parser-master/web/node_modules/
+cc-parser-master/cc-parser-master/.agents/
+
+# Test results
+web/test-results/

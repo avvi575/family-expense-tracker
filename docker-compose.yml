@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: fet-db
+    environment:
+      POSTGRES_USER: fet
+      POSTGRES_PASSWORD: fet_secret
+      POSTGRES_DB: family_expense_tracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - fet_pgdata:/var/lib/postgresql/data
+
+volumes:
+  fet_pgdata:

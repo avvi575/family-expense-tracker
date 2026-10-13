@@ -1,0 +1,429 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["public", "import", "stage"]
+}
+
+model User {
+  id                    String                @id @default(cuid())
+  email                 String                @unique
+  passwordHash          String
+  name                  String
+  createdAt             DateTime              @default(now())
+  resetToken            String?
+  resetTokenExpiry      DateTime?
+  bankStatementImports  BankStatementImport[]
+  created               Expense[]             @relation("CreatedBy")
+  expenses              Expense[]             @relation("PaidBy")
+  ownedFamilies         Family[]
+  memberships           FamilyMember[]
+  declaredIncomes       Income[]              @relation("IncomeDeclaredBy")
+  incomes               Income[]              @relation("IncomeMember")
+  notifications         Notification[]
+  recurringExpenses     RecurringExpense[]
+  statementImports      StatementImport[]
+  reviewedStatementRows StatementRow[]        @relation("StatementReviewer")
+  reviewedBankRows      BankStatementRow[]    @relation("BankRowReviewer")
+  reviewedExpenses      Expense[]             @relation("ExpenseReviewer")
+
+  @@map("users")
+  @@schema("public")
+}
+
+model Family {
+  id                   String                @id @default(cuid())
+  name                 String
+  ownerId              String
+  createdAt            DateTime              @default(now())
+  alerts               Alert[]
+  bankStatementImports BankStatementImport[]
+  budgets              Budget[]
+  categories           Category[]
+  expenses             Expense[]
+  owner                User                  @relation(fields: [ownerId], references: [id])
+  members              FamilyMember[]
+  goals                Goal[]
+  incomes              Income[]
+  invites              Invite[]
+  recurringExpenses    RecurringExpense[]
+  recurringPatterns    RecurringPattern[]
+  statementImports     StatementImport[]
+
+  @@map("families")
+  @@schema("public")
+}
+
+model FamilyMember {
+  id       String @id @default(cuid())
+  familyId String
+  userId   String
+  role     String @default("MEMBER")
+  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, userId])
+  @@map("family_members")
+  @@schema("public")
+}
+
+model Invite {
+  id        String   @id @default(cuid())
+  familyId  String
+  email     String
+  mobile    String?
+  message   String?
+  role      String   @default("MEMBER")
+  token     String   @unique
+  accepted  Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("invites")
+  @@schema("public")
+}
+
+model Category {
+  id                String               @id @default(cuid())
+  familyId          String?
+  name              String
+  icon              String               @default("🧾")
+  color             String               @default("#6b7280")
+  parentId          String?
+  bankConfirmedRows BankStatementRow[]   @relation("BankConfirmedCat")
+  bankSuggestedRows BankStatementRow[]   @relation("BankSuggestedCat")
+  bankSplits        BankStatementSplit[]
+  budgets           Budget[]
+  family            Family?              @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  parent            Category?            @relation("CategoryChildren", fields: [parentId], references: [id])
+  children          Category[]           @relation("CategoryChildren")
+  expenses          Expense[]
+  recurringExpenses RecurringExpense[]
+  recurringPatterns RecurringPattern[]
+  confirmedRows     StatementRow[]       @relation("ConfirmedCat")
+  suggestedRows     StatementRow[]       @relation("SuggestedCat")
+
+  @@map("categories")
+  @@schema("public")
+}
+
+model Expense {
+  id               String             @id @default(cuid())
+  familyId         String
+  categoryId       String
+  paidById         String
+  amount           Decimal
+  date             DateTime
+  paymentMethod    String             @default("CASH")
+  notes            String?
+  receiptUrl       String?
+  createdById      String
+  reviewed         Boolean            @default(false)
+  reviewedAt       DateTime?
+  reviewedById     String?
+  recurringId      String?
+  importedRowId    String?            @unique
+  importedRows     StatementRow[]     @relation("ExpenseImportedRow")
+  createdAt        DateTime           @default(now())
+  bankImportedRows BankStatementRow[] @relation("BankRowExpense")
+  category         Category           @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  createdBy        User               @relation("CreatedBy", fields: [createdById], references: [id])
+  family           Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  paidBy           User               @relation("PaidBy", fields: [paidById], references: [id])
+  reviewedBy       User?              @relation("ExpenseReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  recurring        RecurringExpense?  @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+
+  @@map("expenses")
+  @@schema("stage")
+}
+
+model Budget {
+  id         String   @id @default(cuid())
+  familyId   String
+  categoryId String
+  month      String
+  amount     Decimal
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  family     Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, categoryId, month])
+  @@map("budgets")
+  @@schema("public")
+}
+
+model Goal {
+  id            String             @id @default(cuid())
+  familyId      String
+  name          String
+  targetAmount  Decimal
+  savedAmount   Decimal            @default(0)
+  deadline      DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime?
+  contributions GoalContribution[]
+  family        Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("goals")
+  @@schema("public")
+}
+
+model GoalContribution {
+  id         String   @id @default(cuid())
+  goalId     String
+  memberId   String
+  memberName String
+  amount     Decimal
+  note       String?
+  createdAt  DateTime @default(now())
+  goal       Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId])
+  @@map("goal_contributions")
+  @@schema("public")
+}
+
+model RecurringExpense {
+  id            String    @id @default(cuid())
+  familyId      String
+  name          String
+  categoryId    String
+  paidById      String
+  amount        Decimal
+  interval      String
+  startDate     DateTime
+  endDate       DateTime?
+  paymentMethod String    @default("CASH")
+  notes         String?
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  expenses      Expense[]
+  category      Category  @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  family        Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  paidBy        User      @relation(fields: [paidById], references: [id])
+
+  @@map("recurring_expenses")
+  @@schema("public")
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  familyId  String
+  name      String
+  condition String
+  type      String   @default("EXPENSE")
+  triggered Boolean  @default(false)
+  createdAt DateTime @default(now())
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("alerts")
+  @@schema("public")
+}
+
+model Income {
+  id           String    @id @default(cuid())
+  familyId     String
+  memberId     String
+  declaredById String
+  amount       Decimal
+  type         String    @default("OTHER")
+  source       String
+  isRecurring  Boolean   @default(false)
+  date         DateTime
+  endDate      DateTime?
+  notes        String?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  declaredBy   User      @relation("IncomeDeclaredBy", fields: [declaredById], references: [id])
+  family       Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member       User      @relation("IncomeMember", fields: [memberId], references: [id])
+
+  @@map("incomes")
+  @@schema("public")
+}
+
+model StatementImport {
+  id              String         @id @default(cuid())
+  familyId        String
+  uploadedById    String
+  sourceType      String         @default("UPLOAD")
+  fileName        String
+  fileUrl         String
+  fileHash        String
+  bank            String
+  cardLast4       String         @default("")
+  periodFrom      DateTime
+  periodTo        DateTime
+  statementTotal  Decimal
+  extractedDebit  Decimal
+  validationDelta Decimal
+  validationPass  Boolean
+  status          String         @default("PARSED")
+  errorMessage    String?
+  importedCount   Int?
+  skippedCount    Int?
+  createdAt       DateTime       @default(now())
+  family          Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  uploadedBy      User           @relation(fields: [uploadedById], references: [id])
+  rows            StatementRow[]
+
+  @@map("statement_imports")
+  @@schema("import")
+}
+
+model StatementRow {
+  id                  String          @id @default(cuid())
+  importId            String
+  serialNumber        String
+  date                DateTime
+  rawDescription      String
+  description         String
+  amount              Decimal
+  isCredit            Boolean         @default(false)
+  duplicate           Boolean         @default(false)
+  excluded            Boolean         @default(false)
+  reviewed            Boolean         @default(false)
+  reviewedAt          DateTime?
+  reviewedById        String?
+  suggestedCategoryId String?
+  categoryId          String?
+  expenseId           String?         @unique
+  createdAt           DateTime        @default(now())
+  confirmedCategory   Category?       @relation("ConfirmedCat", fields: [categoryId], references: [id], onDelete: NoAction)
+  expense             Expense?        @relation("ExpenseImportedRow", fields: [expenseId], references: [id], onDelete: SetNull)
+  import              StatementImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  suggestedCategory   Category?       @relation("SuggestedCat", fields: [suggestedCategoryId], references: [id], onDelete: NoAction)
+  reviewer            User?           @relation("StatementReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([importId, reviewed])
+  @@map("statement_rows")
+  @@schema("import")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+  @@schema("public")
+}
+
+model BankStatementImport {
+  id              String             @id @default(cuid())
+  familyId        String
+  uploadedById    String
+  sourceType      String             @default("UPLOAD")
+  accountType     String             @default("SAVINGS")
+  fileName        String
+  fileUrl         String
+  fileHash        String
+  bank            String
+  accountLast4    String             @default("")
+  periodFrom      DateTime
+  periodTo        DateTime
+  openingBalance  Decimal?
+  closingBalance  Decimal?
+  totalCredits    Decimal            @default(0)
+  totalDebits     Decimal            @default(0)
+  validationPass  Boolean            @default(false)
+  validationDelta Decimal            @default(0)
+  status          String             @default("PARSED")
+  errorMessage    String?
+  passwordHint    String?
+  importedCount   Int?
+  skippedCount    Int?
+  createdAt       DateTime           @default(now())
+  family          Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  uploadedBy      User               @relation(fields: [uploadedById], references: [id])
+  rows            BankStatementRow[]
+
+  @@map("bank_statement_imports")
+  @@schema("import")
+}
+
+model BankStatementRow {
+  id                  String               @id @default(cuid())
+  importId            String
+  serialNumber        String
+  date                DateTime
+  valueDate           DateTime?
+  rawDescription      String
+  description         String
+  refNumber           String?
+  amount              Decimal
+  isCredit            Boolean              @default(false)
+  balanceAfter        Decimal?
+  duplicate           Boolean              @default(false)
+  excluded            Boolean              @default(false)
+  reviewed            Boolean              @default(false)
+  reviewedAt          DateTime?
+  reviewedById        String?
+  suggestedCategoryId String?
+  categoryId          String?
+  reconciledExpenseId String?
+  import              BankStatementImport  @relation(fields: [importId], references: [id], onDelete: Cascade)
+  suggestedCategory   Category?            @relation("BankSuggestedCat", fields: [suggestedCategoryId], references: [id], onDelete: NoAction)
+  confirmedCategory   Category?            @relation("BankConfirmedCat", fields: [categoryId], references: [id], onDelete: NoAction)
+  reconciledExpense   Expense?             @relation("BankRowExpense", fields: [reconciledExpenseId], references: [id], onDelete: SetNull)
+  splits              BankStatementSplit[]
+  createdAt           DateTime             @default(now())
+  reviewer            User?                @relation("BankRowReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([importId, reviewed])
+  @@map("bank_statement_rows")
+  @@schema("import")
+}
+
+model BankStatementSplit {
+  id         String           @id @default(cuid())
+  rowId      String
+  categoryId String
+  amount     Decimal
+  notes      String?
+  createdAt  DateTime         @default(now())
+  category   Category         @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  row        BankStatementRow @relation(fields: [rowId], references: [id], onDelete: Cascade)
+
+  @@map("bank_statement_splits")
+  @@schema("import")
+}
+
+model RecurringPattern {
+  id               String    @id @default(cuid())
+  familyId         String
+  descriptionKey   String
+  merchant         String
+  amountAvg        Decimal
+  intervalDays     Int
+  occurrences      Int       @default(0)
+  lastSeen         DateTime
+  categoryId       String?
+  sampleCategoryId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  category         Category? @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  family           Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, descriptionKey])
+  @@map("recurring_patterns")
+  @@schema("import")
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("app_settings")
+  @@schema("public")
+}

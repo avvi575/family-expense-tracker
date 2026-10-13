@@ -1,0 +1,135 @@
+# Parsing Notes
+
+This document explains the statement structures the parser handles and the normalization logic used by this project.
+
+## Scope
+
+- Input: password-protected or plain PDF credit card statements.
+- Supported parsing profiles: `hdfc`, `icici`, `sbi`, `idfc`, `indusind`, `hsbc`, `axis`, `jupiter`, `slice`, `ssfb`, `bob`, `yesbank`, `equitas`, `generic`.
+- Output: normalized JSON for transactions, totals, and reconciliation.
+
+Privacy handling:
+
+- Parsed output keeps only the input file basename, not the full local path.
+- Raw/debug exports still contain statement-derived content and should be treated as sensitive.
+
+## Common PDF Patterns
+
+Credit card statement PDFs typically contain a mix of:
+
+- Header summary region (`Total Amount Due`, `Due Date`, limits).
+- Transaction tables (date, reference, narration, points, amount).
+- Supplementary/add-on sections separated by card number headings.
+- Informational sections that look tabular but are not transactions.
+
+Extraction caveats that parser accounts for:
+
+- Wrapped rows where date/amount and narration may split across lines.
+- OCR/font artifacts (`(cid:...)`, duplicated characters, broken spacing).
+- Mixed separators (`|`, irregular spaces, merged tokens).
+- Credit markers (for example, `CR` or bare `C`/`D` for SBI, `DR`/`CR` for IDFC, `CR` suffix for HSBC, `Cr`/`Dr` for Axis) that indicate refunds/payments.
+- Page-1 bank branding that should be preferred over merchant text when auto-detecting the issuer.
+- Equitas-style page-1 summaries where `Total Due` / `Due Date` live above the transaction grid and MITC/example pages later in the PDF contain unrelated sample totals.
+- HSBC payment-summary labels that may not survive text extraction. The parser uses the page-1 statement-period row to recover `Total payment due` and does not substitute `Net outstanding balance`, because that balance can include future loan instalments.
+- HSBC reward summaries that expose aggregate opening/earned/redeemed/closing values but no per-transaction points. Earned and closing values are normalized as point counts; earned points populate card/person rollups only when there is exactly one unambiguous card/person group.
+- HSBC EMI postings whose principal/interest detail is printed on a continuation line below both a `CR` transfer and matching billed debit. The detail is retained in narration, the internal credit remains observable in `payments_refunds`, and smart reconciliation excludes it from credits applied to the current payable amount.
+
+## Normalized Output Model
+
+Key top-level fields in compact output:
+
+- `name`
+- `card_number`
+- `due_date`
+- `statement_total_amount_due`
+- `transactions` (debit side)
+- `payments_refunds` (credit side)
+- `card_summaries`
+- `person_groups`
+- `overall_total` (debits only)
+- `overall_reward_points` (debits only, earned this cycle)
+- `reward_points_balance` (cumulative balance, when available)
+- `reconciliation`
+
+## Parser Layout
+
+- `cc_parser/parsers/registry.py` keeps the stable ordered parser registry used by factory/browser surfaces.
+- `cc_parser/parsers/generic.py` is the shared base; migrate banks by overriding only the stages that differ.
+- `cc_parser/parsers/summary/` holds name, due-date, total-due, grouping, and reconciliation helpers.
+- `cc_parser/parsers/adjustment_pairing/` is the single source of truth for refund candidate generation, scoring, and constants. Import directly from this subpackage — no top-level shims exist.
+
+## Transaction Parsing Strategy
+
+1. Extract words with coordinates from each page.
+2. Group words into visual lines by y-position tolerance.
+3. Detect transaction candidates by date + amount signatures.
+4. Parse optional time, rewards, narration, amount.
+5. Classify rows as debit or credit using table/context signals.
+6. Attach card/person context based on nearby section headers.
+
+### Inline Action Controls
+
+Some templates print an inline action control — a "convert to instalment"
+button, a promo tag — as a text run on the transaction's own baseline, in a
+lane between the time column and the description column. Step 2 is
+column-blind, so the control's word is swept into the narration and the row
+reads as if the merchant were named after it.
+
+The control is identified by position, never by its text: descriptions
+legitimately begin with the same words the buttons carry (an instalment
+processing fee, a conversion adjustment), and matching on the string would
+destroy exactly the rows it appears to fix.
+
+The description column is read off the page's own table header — the left edge
+of its `TRANSACTION DESCRIPTION` cell — and a word in the narration span that
+starts left of that column is dropped. Deriving the column from the rows
+instead does not work: a sparse page can carry more control rows than plain
+ones, and a description that opens with a short word looks like a control to
+any frequency rule. Pages with no header, or with two that disagree, are left
+alone.
+
+Removal is opt-in per profile (`strip_action_lane`), since it presumes nothing
+legitimate renders left of the description column. HDFC opts in.
+
+Stripping may change what a narration says; it may never change whether a
+transaction is emitted. The row as printed decides that, and stripped text is
+used only where it independently passes the same gate.
+
+## Add-on Handling
+
+- Card switches are detected from masked card rows in statement tables.
+- If add-on names are unavailable or low-confidence, labels are generated as:
+  - `ADDON <last 4 digits of addon>`
+
+## Reconciliation
+
+`reconciliation` provides quick sanity checks between:
+
+- statement-level due amount,
+- parsed debit/credit totals,
+- and derived deltas.
+
+The **smart delta** (`smart_expected_total`) accounts for previous balance:
+
+    expected = previous_balance + parsed_debits + fees - applicable_credits
+
+Normally all parsed credits are applicable. A bank parser may exclude a structurally identified internal transfer from payable math while retaining it in parsed credit totals. `smart_credit_total` and `smart_excluded_credit_total` make that adjustment explicit. A near-zero smart delta confirms all relevant transactions are captured.
+
+When previous balance exists and credits cover it, the reconciliation also reports:
+
+- **Previous Balance Cleared On**: the date cumulative credits first exceeded the previous balance.
+- **Excess Paid After Clearing**: `total_credits - previous_balance` — the portion that went toward current-cycle charges.
+
+This is meant for auditing parser behavior and identifying edge cases.
+
+## Date Handling
+
+- Shared date normalization now lives in `cc_parser/parsers/tokens.py` and is backed by `python-dateutil`.
+- Output dates remain the downstream contract: `DD/MM/YYYY`.
+- Custom parsers should prefer `parse_date()` / `parse_multi_token_date()` plus narrow parser overrides rather than rolling their own `strptime` helpers.
+
+## Design Rule
+
+Parsing logic avoids dependence on account-specific values and does not require embedding any real statement content.
+
+The canonical profile list lives in `cc_parser/parsers/registry.py`; `factory.py` owns auto-detection, while the registry owns the stable user-facing bank list.

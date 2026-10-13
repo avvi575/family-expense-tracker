@@ -1,0 +1,17 @@
+@supports not (color: oklch(50% 0 0)) {
+  /* Fallback colors for browsers without oklch support */
+  :root {
+    --color-indigo-600: #4f46e5;
+    --color-indigo-700: #4338ca;
+    --color-emerald-700: #14b8a6;
+    --color-amber-700: #f59e0b;
+    --color-slate-50: #f8fafc;
+    --color-slate-100: #f1f5f9;
+    --color-slate-700: #334155;
+    --color-emerald-100: #d1fae5;
+    --color-amber-100: #fef3c7;
+    --color-indigo-100: #e5e7eb;
+  }
+}
+
+@import "tailwindcss";
